@@ -290,11 +290,54 @@ function getSyncConfig(){
   }catch(e){return {}}
 }
 function setSyncConfig(cfg){
+  const prev=getSyncConfig();
   const fixed={...(cfg||{}),url:normalizeSyncUrl(cfg&&cfg.url)};
   localStorage.setItem(SYNC_CONFIG_KEY,JSON.stringify(fixed));
+  if(prev.url!==fixed.url)resetBridge('Connection URL changed');
   return fixed;
 }
-let cloudSaveTimer=null,cloudSaveSuppressed=false,cloudReady=false,cloudLoadInFlight=false,cloudRevision=null,cloudReconcileTimer=null;
+let cloudSaveTimer=null,cloudSaveSuppressed=false,cloudReady=false,cloudLoadInFlight=false,cloudRevision=null;
+let bridgeFrame=null,bridgeUrl='',bridgeReady=false,bridgeReadyPromise=null,bridgeReadyResolve=null,bridgeReadyReject=null,bridgeReadyTimer=null;
+let bridgeSeq=0;const bridgePending=new Map();
+
+function resetBridge(reason='Connection changed'){
+  bridgeReady=false;
+  if(bridgeReadyTimer)clearTimeout(bridgeReadyTimer);
+  if(bridgeFrame&&bridgeFrame.parentNode)bridgeFrame.remove();
+  bridgeFrame=null;bridgeUrl='';bridgeReadyPromise=null;bridgeReadyResolve=null;bridgeReadyReject=null;
+  for(const [id,p] of bridgePending){clearTimeout(p.timer);p.reject(new Error(reason));}
+  bridgePending.clear();
+}
+window.addEventListener('message',ev=>{
+  if(!bridgeFrame||ev.source!==bridgeFrame.contentWindow)return;
+  const m=ev.data||{};if(m.source!=='mealPlannerBridge')return;
+  if(m.ready){bridgeReady=true;if(bridgeReadyTimer)clearTimeout(bridgeReadyTimer);if(bridgeReadyResolve)bridgeReadyResolve(true);bridgeReadyResolve=null;bridgeReadyReject=null;return}
+  if(!m.id||!bridgePending.has(m.id))return;
+  const p=bridgePending.get(m.id);bridgePending.delete(m.id);clearTimeout(p.timer);p.resolve(m.payload);
+});
+function ensureBridge(cfg=getSyncConfig()){
+  const url=normalizeSyncUrl(cfg.url);if(!url)return Promise.reject(new Error('Apps Script URL is missing'));
+  if(bridgeFrame&&bridgeUrl===url&&bridgeReady)return Promise.resolve(true);
+  if(bridgeFrame&&bridgeUrl===url&&bridgeReadyPromise)return bridgeReadyPromise;
+  resetBridge();bridgeUrl=url;
+  bridgeReadyPromise=new Promise((resolve,reject)=>{bridgeReadyResolve=resolve;bridgeReadyReject=reject});
+  const f=document.createElement('iframe');f.setAttribute('aria-hidden','true');f.tabIndex=-1;f.style.cssText='position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;border:0;left:-20px;bottom:-20px;';
+  bridgeFrame=f;
+  bridgeReadyTimer=setTimeout(()=>{if(!bridgeReady){const e=new Error('Google bridge did not start');if(bridgeReadyReject)bridgeReadyReject(e);resetBridge('Google bridge timed out')}},15000);
+  f.src=`${url}${url.includes('?')?'&':'?'}bridge=1&_=${Date.now()}`;
+  document.body.appendChild(f);
+  return bridgeReadyPromise;
+}
+function bridgeCall(action,cfg,data={},timeoutMs=18000){
+  return ensureBridge(cfg).then(()=>new Promise((resolve,reject)=>{
+    if(!bridgeFrame||!bridgeFrame.contentWindow){reject(new Error('Google bridge is unavailable'));return}
+    const id=`mp_${Date.now()}_${++bridgeSeq}`;
+    const timer=setTimeout(()=>{bridgePending.delete(id);reject(new Error(`Google ${action} request timed out`))},timeoutMs);
+    bridgePending.set(id,{resolve,reject,timer});
+    bridgeFrame.contentWindow.postMessage({source:'mealPlannerClient',id,action,...data},'*');
+  }));
+}
+
 function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(state));if(!cloudSaveSuppressed)scheduleCloudSave()}
 function scheduleCloudSave(){
   const cfg=getSyncConfig();
@@ -302,20 +345,23 @@ function scheduleCloudSave(){
   if(!cloudReady){setSyncStatus('Local change · waiting for sync');return}
   clearTimeout(cloudSaveTimer);setSyncStatus('Saving…');cloudSaveTimer=setTimeout(()=>cloudSave(cfg),1200);
 }
-function cloudSave(cfg=getSyncConfig()){
+async function cloudSave(cfg=getSyncConfig()){
   if(!cfg.url||!cfg.key){setSyncStatus('Sync off');return}
   if(!cloudReady||cloudRevision===null){setSyncStatus('Loading shared data…');cloudLoad({force:true});return}
   const expectedRevision=cloudRevision;
-  const payload={action:'saveState',key:cfg.key,revision:expectedRevision,state};
   setSyncStatus('Saving…');
-  fetch(cfg.url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)})
-    .then(()=>{
-      clearTimeout(cloudReconcileTimer);
-      cloudReconcileTimer=setTimeout(()=>cloudLoad({silent:true,force:true,expectedRevision:expectedRevision+1}),1800);
-    })
-    .catch(()=>{cloudReady=false;setSyncStatus('Sync issue · local only')});
+  try{
+    const payload=await bridgeCall('save',cfg,{key:cfg.key,revision:expectedRevision,state});
+    if(!payload||!payload.ok){
+      const err=String(payload&&payload.error||'Shared save failed');
+      if(err.startsWith('STALE_REVISION:')){
+        cloudReady=false;setSyncStatus('Newer shared plan found · reloading…');toast('Another device saved a newer plan. Reloading it now.');await cloudLoad({force:true});return;
+      }
+      throw new Error(err);
+    }
+    cloudRevision=Number(payload.revision||expectedRevision+1);cloudReady=true;setSyncStatus('Synced');
+  }catch(e){cloudReady=false;setSyncStatus('Sync issue · local only');toast(e.message||'Could not save shared data')}
 }
-let cloudLoadAttempt=0;
 function applyCloudState(nextState,revision){
   cloudSaveSuppressed=true;
   state=nextState;
@@ -335,36 +381,23 @@ function applyCloudState(nextState,revision){
   applyRulesToPlan();render();renderHistory();updateCartBadge();
   cloudSaveSuppressed=false;
 }
-function cloudLoad(opts={}){
+async function cloudLoad(opts={}){
   const cfg=getSyncConfig();if(!cfg.url||!cfg.key){cloudReady=false;setSyncStatus('Sync off');if(!opts.silent)toast('Add the Apps Script URL and household key first');return}
   if(cloudLoadInFlight)return;
   cloudLoadInFlight=true;
-  const cb='mealPlannerSharedLoad';
-  const attempt=++cloudLoadAttempt,tryNo=Number(opts.tryNo||1);
-  let settled=false,script=null,timer=null;
-  const cleanup=()=>{if(timer)clearTimeout(timer);if(script&&script.parentNode)script.remove();if(window[cb]&&window[cb]._mealPlannerAttempt===attempt)delete window[cb];cloudLoadInFlight=false};
-  const fail=(detail)=>{
-    if(settled)return;settled=true;cleanup();
-    if(tryNo<2&&!opts.silent){setSyncStatus('Retrying sync…');setTimeout(()=>cloudLoad({...opts,force:true,tryNo:tryNo+1}),450);return}
-    cloudReady=false;setSyncStatus('Sync issue · local only');if(!opts.silent)toast(detail||'Could not load shared data');
-  };
-  const handler=payload=>{
-    if(settled)return;settled=true;
-    try{
-      if(!payload||!payload.ok||!payload.state)throw new Error(payload?.error||'No state returned');
-      const rev=Number(payload.revision||0);
-      if(opts.expectedRevision&&rev<opts.expectedRevision&&Number(opts.reconcileTry||0)<2){cleanup();setTimeout(()=>cloudLoad({...opts,force:true,reconcileTry:Number(opts.reconcileTry||0)+1}),900);return}
-      applyCloudState(payload.state,rev);
-      cleanup();setSyncStatus('Synced');
-    }catch(e){cleanup();cloudReady=false;setSyncStatus('Sync issue · local only');if(!opts.silent)toast(e.message||'Shared data response was invalid')}
-  };
-  handler._mealPlannerAttempt=attempt;window[cb]=handler;
-  script=document.createElement('script');script.async=true;script.type='text/javascript';script.referrerPolicy='no-referrer';
-  script.src=`${cfg.url}${cfg.url.includes('?')?'&':'?'}action=loadState&key=${encodeURIComponent(cfg.key)}&callback=${cb}&_=${Date.now()}`;
-  script.onerror=()=>fail('Google shared-data request was blocked or failed');
-  timer=setTimeout(()=>fail('Shared-data request timed out'),12000);
-  if(!opts.silent)setSyncStatus(attempt===1?'Loading…':'Retrying sync…');
-  document.head.appendChild(script);
+  if(!opts.silent)setSyncStatus('Loading…');
+  try{
+    const payload=await bridgeCall('load',cfg,{key:cfg.key});
+    if(!payload||!payload.ok||!payload.state)throw new Error(payload&&payload.error||'No shared state returned');
+    const rev=Number(payload.revision||0);
+    if(opts.expectedRevision&&rev<opts.expectedRevision&&Number(opts.reconcileTry||0)<2){
+      cloudLoadInFlight=false;setTimeout(()=>cloudLoad({...opts,force:true,reconcileTry:Number(opts.reconcileTry||0)+1}),700);return;
+    }
+    applyCloudState(payload.state,rev);setSyncStatus('Synced');
+  }catch(e){
+    cloudReady=false;setSyncStatus('Sync issue · local only');
+    if(!opts.silent)toast((e&&e.message)||'Could not load shared data');
+  }finally{cloudLoadInFlight=false}
 }
 function setSyncStatus(msg){
   const el=document.getElementById('syncStatus');if(el)el.textContent=msg;
