@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#f7f3ea" />
-  <title>Meal Planner — v6.3</title>
+  <title>Meal Planner — v6.4</title>
   <style>
     :root{
       --bg:#f7f3ea; --panel:#fffdf8; --ink:#1f2a26; --muted:#6f7973; --line:#ded9cf;
@@ -264,50 +264,106 @@ function normalizeMeal(m){
   const proteinLevel=(m.proteinLevel||m.protein||'Medium').toString().trim();
   return {...m,types,proteinLevel:['Low','Medium','High'].includes(proteinLevel)?proteinLevel:'Medium',repeatWeeks:Number(m.repeatWeeks||4),last:(m.last===null||m.last===undefined||m.last==='')?null:Number(m.last)};
 }
-function getSyncConfig(){try{return JSON.parse(localStorage.getItem(SYNC_CONFIG_KEY)||'{}')}catch(e){return {}}}
-function setSyncConfig(cfg){localStorage.setItem(SYNC_CONFIG_KEY,JSON.stringify(cfg||{}))}
-let cloudSaveTimer=null,cloudSaveSuppressed=false;
-const CLOUD_SESSION_KEY='mealSpinnerCloudLoadedSessionV1';
+function normalizeSyncUrl(raw){
+  let url=String(raw||'').trim();
+  if(!url)return '';
+  // Google adds /u/N/ when several accounts are signed in. That account-specific route is unreliable for public web-app calls.
+  url=url.replace(/https:\/\/script\.google\.com\/macros\/u\/\d+\/s\//i,'https://script.google.com/macros/s/');
+  try{
+    const u=new URL(url);
+    if(u.hostname==='script.google.com'){
+      u.pathname=u.pathname.replace(/^\/macros\/u\/\d+\/s\//,'/macros/s/');
+      u.search='';u.hash='';
+      url=u.toString();
+    }else{
+      u.search='';u.hash='';url=u.toString();
+    }
+  }catch(e){url=url.split(/[?#]/)[0]}
+  return url.replace(/\/$/,'');
+}
+function getSyncConfig(){
+  try{
+    const cfg=JSON.parse(localStorage.getItem(SYNC_CONFIG_KEY)||'{}');
+    const fixed={...cfg,url:normalizeSyncUrl(cfg.url)};
+    if((cfg.url||'')!==fixed.url)localStorage.setItem(SYNC_CONFIG_KEY,JSON.stringify(fixed));
+    return fixed;
+  }catch(e){return {}}
+}
+function setSyncConfig(cfg){
+  const fixed={...(cfg||{}),url:normalizeSyncUrl(cfg&&cfg.url)};
+  localStorage.setItem(SYNC_CONFIG_KEY,JSON.stringify(fixed));
+  return fixed;
+}
+let cloudSaveTimer=null,cloudSaveSuppressed=false,cloudReady=false,cloudLoadInFlight=false,cloudRevision=null,cloudReconcileTimer=null;
 function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(state));if(!cloudSaveSuppressed)scheduleCloudSave()}
-function scheduleCloudSave(){const cfg=getSyncConfig();if(!cfg.url||!cfg.key){setSyncStatus('Sync off');return}clearTimeout(cloudSaveTimer);setSyncStatus('Saving…');cloudSaveTimer=setTimeout(()=>cloudSave(cfg),1200)}
+function scheduleCloudSave(){
+  const cfg=getSyncConfig();
+  if(!cfg.url||!cfg.key){setSyncStatus('Sync off');return}
+  if(!cloudReady){setSyncStatus('Local change · waiting for sync');return}
+  clearTimeout(cloudSaveTimer);setSyncStatus('Saving…');cloudSaveTimer=setTimeout(()=>cloudSave(cfg),1200);
+}
 function cloudSave(cfg=getSyncConfig()){
   if(!cfg.url||!cfg.key){setSyncStatus('Sync off');return}
-  const payload={action:'saveState',key:cfg.key,state};
-  fetch(cfg.url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)}).then(()=>setSyncStatus('Synced')).catch(()=>setSyncStatus('Sync issue'));
+  if(!cloudReady||cloudRevision===null){setSyncStatus('Loading shared data…');cloudLoad({force:true});return}
+  const expectedRevision=cloudRevision;
+  const payload={action:'saveState',key:cfg.key,revision:expectedRevision,state};
+  setSyncStatus('Saving…');
+  fetch(cfg.url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)})
+    .then(()=>{
+      clearTimeout(cloudReconcileTimer);
+      cloudReconcileTimer=setTimeout(()=>cloudLoad({silent:true,force:true,expectedRevision:expectedRevision+1}),1800);
+    })
+    .catch(()=>{cloudReady=false;setSyncStatus('Sync issue · local only')});
 }
 let cloudLoadAttempt=0;
-function cloudLoad(){
-  const cfg=getSyncConfig();if(!cfg.url||!cfg.key){toast('Add the Apps Script URL and household key first');return}
+function applyCloudState(nextState,revision){
+  cloudSaveSuppressed=true;
+  state=nextState;
+  state.settings={...clone(defaults.settings),...(state.settings||{})};
+  state.settings.rules={...clone(defaults.settings.rules),...((state.settings&&state.settings.rules)||{})};
+  state.settings.rules.batch=[...new Set(state.settings.rules.batch||[])];
+  state.settings.rules.blank=[...new Set(state.settings.rules.blank||[])];
+  state.settings.rules.guest=[...new Set(state.settings.rules.guest||[])];
+  state.settings.rules.cook=state.settings.rules.cook||{};
+  if(state.settings.balanceProteinLevels===undefined)state.settings.balanceProteinLevels=state.settings.avoidBackToBackProtein!==false;
+  state.meals=(state.meals||clone(defaults.meals)).map(normalizeMeal);
+  state.plan=state.plan||{};
+  state.shoppingDraft={items:[],sourceSlots:[],generatedAt:null,cleared:false,...(state.shoppingDraft||{})};
+  state.shoppingRuns=Array.isArray(state.shoppingRuns)?state.shoppingRuns:[];
+  cloudRevision=Number(revision||0);cloudReady=true;
+  localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
+  applyRulesToPlan();render();renderHistory();updateCartBadge();
+  cloudSaveSuppressed=false;
+}
+function cloudLoad(opts={}){
+  const cfg=getSyncConfig();if(!cfg.url||!cfg.key){cloudReady=false;setSyncStatus('Sync off');if(!opts.silent)toast('Add the Apps Script URL and household key first');return}
+  if(cloudLoadInFlight)return;
+  cloudLoadInFlight=true;
   const cb='mealPlannerSharedLoad';
-  const attempt=++cloudLoadAttempt;
-  let settled=false;
-  let script=null;
-  let timer=null;
-  const cleanup=()=>{if(timer)clearTimeout(timer);if(script&&script.parentNode)script.remove();if(window[cb]&&window[cb]._mealPlannerAttempt===attempt)delete window[cb]};
+  const attempt=++cloudLoadAttempt,tryNo=Number(opts.tryNo||1);
+  let settled=false,script=null,timer=null;
+  const cleanup=()=>{if(timer)clearTimeout(timer);if(script&&script.parentNode)script.remove();if(window[cb]&&window[cb]._mealPlannerAttempt===attempt)delete window[cb];cloudLoadInFlight=false};
   const fail=(detail)=>{
     if(settled)return;settled=true;cleanup();
-    if(attempt<2){setSyncStatus('Retrying sync…');setTimeout(cloudLoad,450);return}
-    cloudSaveSuppressed=false;setSyncStatus('Sync issue');toast(detail||'Could not load shared data');
+    if(tryNo<2&&!opts.silent){setSyncStatus('Retrying sync…');setTimeout(()=>cloudLoad({...opts,force:true,tryNo:tryNo+1}),450);return}
+    cloudReady=false;setSyncStatus('Sync issue · local only');if(!opts.silent)toast(detail||'Could not load shared data');
   };
   const handler=payload=>{
     if(settled)return;settled=true;
     try{
       if(!payload||!payload.ok||!payload.state)throw new Error(payload?.error||'No state returned');
-      cloudSaveSuppressed=true;
-      localStorage.setItem(STORAGE_KEY,JSON.stringify(payload.state));
-      sessionStorage.setItem(CLOUD_SESSION_KEY,'1');
-      setSyncStatus('Loaded from Sheets');
-      cleanup();
-      location.reload();
-    }catch(e){cleanup();cloudSaveSuppressed=false;setSyncStatus('Sync issue');toast(e.message||'Shared data response was invalid')}
+      const rev=Number(payload.revision||0);
+      if(opts.expectedRevision&&rev<opts.expectedRevision&&Number(opts.reconcileTry||0)<2){cleanup();setTimeout(()=>cloudLoad({...opts,force:true,reconcileTry:Number(opts.reconcileTry||0)+1}),900);return}
+      applyCloudState(payload.state,rev);
+      cleanup();setSyncStatus('Synced');
+    }catch(e){cleanup();cloudReady=false;setSyncStatus('Sync issue · local only');if(!opts.silent)toast(e.message||'Shared data response was invalid')}
   };
   handler._mealPlannerAttempt=attempt;window[cb]=handler;
-  script=document.createElement('script');
-  script.async=true;script.type='text/javascript';script.referrerPolicy='no-referrer';
+  script=document.createElement('script');script.async=true;script.type='text/javascript';script.referrerPolicy='no-referrer';
   script.src=`${cfg.url}${cfg.url.includes('?')?'&':'?'}action=loadState&key=${encodeURIComponent(cfg.key)}&callback=${cb}&_=${Date.now()}`;
   script.onerror=()=>fail('Google shared-data request was blocked or failed');
   timer=setTimeout(()=>fail('Shared-data request timed out'),12000);
-  setSyncStatus(attempt===1?'Loading…':'Retrying sync…');
+  if(!opts.silent)setSyncStatus(attempt===1?'Loading…':'Retrying sync…');
   document.head.appendChild(script);
 }
 function setSyncStatus(msg){
@@ -780,7 +836,7 @@ function renderRules(){
 
   const syncSec=sectionTitle(root,'Shared Google Sheet sync','Optional live mode for you and your wife. The front end can stay on GitHub Pages; a small Apps Script web app writes the shared state into the Google Sheet.');
   const cfg=getSyncConfig(),box=document.createElement('div');box.className='syncBox';box.innerHTML=`<input id="syncUrl" placeholder="Apps Script web app URL" value="${cfg.url||''}"><input id="syncKey" placeholder="Household key" type="password" value="${cfg.key||''}"><div class="syncActions"><button class="btn" id="saveSyncCfg">Save connection</button><button class="btn" id="loadCloud">↓ Load from Sheets</button><button class="btn" id="saveCloud">↑ Save now</button></div><div class="syncStatus" id="syncStatus">${cfg.url?'Connection saved on this device':'Not connected yet'}</div>`;syncSec.appendChild(box);
-  box.querySelector('#saveSyncCfg').onclick=()=>{setSyncConfig({url:box.querySelector('#syncUrl').value.trim(),key:box.querySelector('#syncKey').value.trim()});sessionStorage.removeItem(CLOUD_SESSION_KEY);setSyncStatus('Connection saved on this device');toast('Sync connection saved')};box.querySelector('#loadCloud').onclick=cloudLoad;box.querySelector('#saveCloud').onclick=()=>{const c={url:box.querySelector('#syncUrl').value.trim(),key:box.querySelector('#syncKey').value.trim()};setSyncConfig(c);cloudSave(c);toast('Saving shared state…')};
+  box.querySelector('#saveSyncCfg').onclick=()=>{const entered=box.querySelector('#syncUrl').value.trim();const c=setSyncConfig({url:entered,key:box.querySelector('#syncKey').value.trim()});box.querySelector('#syncUrl').value=c.url;cloudReady=false;cloudRevision=null;setSyncStatus('Loading…');toast(c.url!==entered?'Connection saved — Google account URL corrected':'Connection saved — loading shared plan');cloudLoad({force:true})};box.querySelector('#loadCloud').onclick=()=>cloudLoad({force:true});box.querySelector('#saveCloud').onclick=()=>{const c=setSyncConfig({url:box.querySelector('#syncUrl').value.trim(),key:box.querySelector('#syncKey').value.trim()});box.querySelector('#syncUrl').value=c.url;if(!cloudReady){toast('Loading the latest shared plan first');cloudLoad({force:true});return}cloudSave(c);toast('Saving shared state…')};
 
   const reset=document.createElement('button');reset.className='btn';reset.style.marginTop='14px';reset.textContent='Reset rules to defaults';reset.onclick=()=>{state.settings.rules=clone(defaults.settings.rules);state.settings.repeatGap=defaults.settings.repeatGap;state.settings.horizonDays=defaults.settings.horizonDays;state.settings.batchReuseWithinDays=defaults.settings.batchReuseWithinDays;state.settings.balanceProteinLevels=true;state.settings.respectType=true;state.settings.allowBlank=true;applyRulesToPlan();renderRules();render();toast('Default rules restored')};root.appendChild(reset);
 }
@@ -894,9 +950,11 @@ document.getElementById('confirmSpin').onclick=confirmSpinRange;
 document.getElementById('confirmMealSelection').onclick=confirmPickerSelection;
 document.getElementById('clearTile').onclick=clearActiveTile;
 const startupSync=getSyncConfig();
-if(startupSync.url&&startupSync.key&&!sessionStorage.getItem(CLOUD_SESSION_KEY)){cloudSaveSuppressed=true;setSyncStatus('Loading…');setTimeout(cloudLoad,80)}
-else{cloudSaveSuppressed=false;setSyncStatus(startupSync.url&&startupSync.key?'Synced':'Sync off')}
+if(startupSync.url&&startupSync.key){cloudSaveSuppressed=true;cloudReady=false;setSyncStatus('Loading…');setTimeout(()=>cloudLoad({force:true}),80)}
+else{cloudSaveSuppressed=false;cloudReady=false;setSyncStatus('Sync off')}
 applyRulesToPlan();render();
+window.addEventListener('focus',()=>{const c=getSyncConfig();if(c.url&&c.key&&!cloudLoadInFlight)cloudLoad({silent:true,force:true})});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){const c=getSyncConfig();if(c.url&&c.key&&!cloudLoadInFlight)cloudLoad({silent:true,force:true})}});
 </script>
 
 </body>
