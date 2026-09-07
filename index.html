@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#f7f3ea" />
-  <title>Meal Planner — v6.2</title>
+  <title>Meal Planner — v6.3</title>
   <style>
     :root{
       --bg:#f7f3ea; --panel:#fffdf8; --ink:#1f2a26; --muted:#6f7973; --line:#ded9cf;
@@ -275,10 +275,40 @@ function cloudSave(cfg=getSyncConfig()){
   const payload={action:'saveState',key:cfg.key,state};
   fetch(cfg.url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)}).then(()=>setSyncStatus('Synced')).catch(()=>setSyncStatus('Sync issue'));
 }
+let cloudLoadAttempt=0;
 function cloudLoad(){
   const cfg=getSyncConfig();if(!cfg.url||!cfg.key){toast('Add the Apps Script URL and household key first');return}
-  const cb='mealSpinnerCloud_'+Date.now();window[cb]=payload=>{try{if(!payload||!payload.ok||!payload.state)throw new Error(payload?.error||'No state returned');cloudSaveSuppressed=true;localStorage.setItem(STORAGE_KEY,JSON.stringify(payload.state));sessionStorage.setItem(CLOUD_SESSION_KEY,'1');setSyncStatus('Loaded from Sheets');delete window[cb];script.remove();location.reload()}catch(e){setSyncStatus('Load failed');toast(e.message)}};
-  const script=document.createElement('script');script.src=`${cfg.url}${cfg.url.includes('?')?'&':'?'}action=loadState&key=${encodeURIComponent(cfg.key)}&callback=${cb}&_=${Date.now()}`;script.onerror=()=>{cloudSaveSuppressed=false;setSyncStatus('Load failed');toast('Could not load shared data');delete window[cb];script.remove()};document.body.appendChild(script);setSyncStatus('Loading…');
+  const cb='mealPlannerSharedLoad';
+  const attempt=++cloudLoadAttempt;
+  let settled=false;
+  let script=null;
+  let timer=null;
+  const cleanup=()=>{if(timer)clearTimeout(timer);if(script&&script.parentNode)script.remove();if(window[cb]&&window[cb]._mealPlannerAttempt===attempt)delete window[cb]};
+  const fail=(detail)=>{
+    if(settled)return;settled=true;cleanup();
+    if(attempt<2){setSyncStatus('Retrying sync…');setTimeout(cloudLoad,450);return}
+    cloudSaveSuppressed=false;setSyncStatus('Sync issue');toast(detail||'Could not load shared data');
+  };
+  const handler=payload=>{
+    if(settled)return;settled=true;
+    try{
+      if(!payload||!payload.ok||!payload.state)throw new Error(payload?.error||'No state returned');
+      cloudSaveSuppressed=true;
+      localStorage.setItem(STORAGE_KEY,JSON.stringify(payload.state));
+      sessionStorage.setItem(CLOUD_SESSION_KEY,'1');
+      setSyncStatus('Loaded from Sheets');
+      cleanup();
+      location.reload();
+    }catch(e){cleanup();cloudSaveSuppressed=false;setSyncStatus('Sync issue');toast(e.message||'Shared data response was invalid')}
+  };
+  handler._mealPlannerAttempt=attempt;window[cb]=handler;
+  script=document.createElement('script');
+  script.async=true;script.type='text/javascript';script.referrerPolicy='no-referrer';
+  script.src=`${cfg.url}${cfg.url.includes('?')?'&':'?'}action=loadState&key=${encodeURIComponent(cfg.key)}&callback=${cb}&_=${Date.now()}`;
+  script.onerror=()=>fail('Google shared-data request was blocked or failed');
+  timer=setTimeout(()=>fail('Shared-data request timed out'),12000);
+  setSyncStatus(attempt===1?'Loading…':'Retrying sync…');
+  document.head.appendChild(script);
 }
 function setSyncStatus(msg){
   const el=document.getElementById('syncStatus');if(el)el.textContent=msg;
