@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#f7f3ea" />
-  <title>Meal Spinner — v6.1</title>
+  <title>Meal Planner — v6.2</title>
   <style>
     :root{
       --bg:#f7f3ea; --panel:#fffdf8; --ink:#1f2a26; --muted:#6f7973; --line:#ded9cf;
@@ -17,7 +17,8 @@
     button{cursor:pointer}
     .app{max-width:780px;margin:auto;padding:10px 10px 72px}
     .topbar{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:10px;position:sticky;top:0;background:linear-gradient(var(--bg) 82%,transparent);padding:7px 0 12px;z-index:5}
-    .brand h1{font-size:1.25rem;margin:0}.brand p{margin:2px 0 0;color:var(--muted);font-size:.78rem}
+     .brand h1{font-size:1.25rem;margin:0}.brand p{margin:2px 0 0;color:var(--muted);font-size:.78rem}
+    .brandMeta{display:flex;align-items:center;gap:8px;margin-top:3px;min-height:17px}.topSyncStatus{display:inline-flex;align-items:center;gap:4px;color:var(--muted);font-size:.64rem;white-space:nowrap}.syncDot{width:6px;height:6px;border-radius:50%;background:#a8afa9;display:inline-block;box-shadow:0 0 0 2px rgba(168,175,169,.14)}.topSyncStatus.good .syncDot{background:#2b9a61;box-shadow:0 0 0 2px rgba(43,154,97,.13)}.topSyncStatus.busy .syncDot{background:#d49a2e;box-shadow:0 0 0 2px rgba(212,154,46,.14)}.topSyncStatus.bad .syncDot{background:#c44352;box-shadow:0 0 0 2px rgba(196,67,82,.14)}.historyLink{border:0;background:transparent;color:var(--accent);font-size:.64rem;font-weight:800;padding:0;text-decoration:underline;text-underline-offset:2px}
     .cartWrap{position:relative}.cartBadge{position:absolute;right:-3px;top:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:#b92f46;color:#fff;font-size:.56rem;font-weight:850;display:none;place-items:center;border:2px solid var(--bg)}.cartBadge.show{display:grid}
     .actions{display:flex;gap:6px;align-items:center}.btn{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:8px 10px;color:var(--ink)}
     .btn.primary{background:var(--accent);color:white;border-color:var(--accent)}
@@ -68,6 +69,7 @@
     .mealgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.mealcard{border:1px solid var(--line);border-radius:13px;background:white;padding:9px}.mealcard h4{margin:0 0 5px;font-size:.87rem}.mealcard p{margin:2px 0;color:var(--muted);font-size:.69rem;line-height:1.3}
     .mealcard{position:relative;padding-right:42px}.mealcard .editMeal{position:absolute;right:7px;top:7px;width:30px;height:30px;border:1px solid var(--line);background:#f7f5ef;border-radius:50%}.mealcard .editMeal:hover{background:var(--accent2)}.mealFormActions{display:flex;gap:7px;align-items:center;margin-top:10px}.mealFormActions .danger{margin-left:auto}.danger{border-color:#e5b8bf!important;color:#9b2035!important;background:#fff7f8!important}
     .shopSummary{background:#f2f6f3;border:1px solid #d6e3da;border-radius:14px;padding:10px 11px;margin-bottom:10px;font-size:.76rem;line-height:1.4;color:#51615a}.shoppingList{display:grid;gap:6px}.shoppingItem{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:9px 10px}.shoppingItem strong{font-size:.84rem}.shoppingItem small{display:block;color:var(--muted);font-size:.65rem;margin-top:2px}.shopActions{position:sticky;bottom:-18px;background:linear-gradient(transparent,#fffdf8 22%);padding:18px 0 2px;display:flex;gap:6px;flex-wrap:wrap}.shopEmpty{padding:24px 8px;text-align:center;color:var(--muted);font-size:.8rem}.irreversible{font-size:.67rem;color:#8d4c33;margin:8px 1px 0;line-height:1.35}.syncBox{display:grid;gap:7px}.syncBox input{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px;background:white}.syncActions{display:flex;gap:6px;flex-wrap:wrap}.syncStatus{font-size:.68rem;color:var(--muted)}
+    .historyIntro{font-size:.74rem;color:var(--muted);line-height:1.4;margin:-2px 0 10px}.historyDays{display:grid;gap:7px}.historyDay{display:grid;grid-template-columns:62px minmax(0,1fr) minmax(0,1fr);gap:7px;align-items:stretch}.historyDate{background:#f3f0e8;border:1px solid var(--line);border-radius:13px;padding:7px 4px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}.historyDate strong{font-size:.72rem}.historyDate .n{font-size:1.04rem;font-weight:850;line-height:1.05;margin:2px 0}.historyDate small{font-size:.55rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}.historyTile{background:#fff;border:1px solid var(--line);border-radius:13px;padding:8px;min-height:84px;display:flex;flex-direction:column}.historyTile.shoppingDone{background:#e6f0fb;border-color:#a9bfd8}.historySlot{font-size:.53rem;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}.historyMeal{font-size:.78rem;font-weight:760;line-height:1.12;margin:7px 0 5px}.historyMeal.empty{font-weight:560;color:#929995}.historyMeta{margin-top:auto;display:flex;gap:4px;flex-wrap:wrap;align-items:center}.historyMeta .chip{font-size:.52rem}.historyActions{display:flex;justify-content:center;margin-top:12px}.historyActions .btn{min-width:150px}
     .formgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.field{display:grid;gap:5px}.field.full{grid-column:1/-1}.field label{font-size:.7rem;color:var(--muted)}.field input,.field select{border:1px solid var(--line);border-radius:10px;padding:9px;background:white;width:100%}
     textarea{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px;min-height:70px;resize:vertical;font:inherit}
     .typeEditor{display:flex;gap:5px;flex-wrap:wrap}.typeEditor input{display:none}.typeEditor label{border:1px solid var(--line);background:white;border-radius:999px;padding:7px 10px;font-size:.74rem;color:#4e5853;cursor:pointer}.typeEditor input:checked+label{background:var(--accent);border-color:var(--accent);color:white}
@@ -77,14 +79,14 @@
       .app{padding:7px 7px 66px}.brand p{display:none}.actions .btn span{display:none}.actions{gap:4px}.btn{padding:8px 9px}.topbar{margin-bottom:6px}.weekbar{margin-bottom:7px;padding:9px 10px}
       .day{grid-template-columns:50px minmax(0,1fr) minmax(0,1fr);gap:5px}.dayhead{padding:6px 3px}.dayhead strong{font-size:.68rem}.dayhead .dateNum{font-size:1rem}.dayhead .month{font-size:.56rem}
       .slot{min-height:109px;padding:7px 6px 6px;border-radius:12px}.mealname{font-size:.78rem;margin-top:7px}.slotlabel{font-size:.54rem}.chips{gap:2px}.chip{font-size:.51rem}.mini{width:23px;height:23px}.cook{height:20px;min-width:20px;font-size:.54rem}
-      .mealgrid{grid-template-columns:1fr}.formgrid{grid-template-columns:1fr}.field.full{grid-column:auto}
+      .mealgrid{grid-template-columns:1fr}.formgrid{grid-template-columns:1fr}.field.full{grid-column:auto}.historyDay{grid-template-columns:50px minmax(0,1fr) minmax(0,1fr);gap:5px}.historyDate{padding:6px 2px}.brandMeta{gap:6px}.topSyncStatus,.historyLink{font-size:.6rem}
     }
   </style>
 </head>
 <body>
 <div class="app">
   <div class="topbar">
-    <div class="brand"><h1>Meal Spinner</h1><p>v6.1 — picker + batch-link fixes</p></div>
+    <div class="brand"><h1>Meal Planner</h1><div class="brandMeta"><span class="topSyncStatus" id="topSyncStatus"><span class="syncDot"></span><span id="topSyncText">Sync off</span></span><button class="historyLink" id="historyBtn">See history</button></div></div>
     <div class="actions">
       <button class="btn icon" id="resetBtn" title="Clear unlocked visible tiles">↻</button>
       <span class="cartWrap"><button class="btn icon" id="shoppingBtn" title="Shopping list">🛒</button><span class="cartBadge" id="cartBadge"></span></span>
@@ -138,6 +140,13 @@
   <div class="shoppingList" id="shoppingList"></div>
   <div class="irreversible">“Mark as shopped” is intentionally one-way for that meal selection. If you later replace a shopped meal with a different meal, the replacement becomes eligible for a future list.</div>
   <div class="shopActions"><button class="btn" id="repopulateShop">↻ Populate again</button><button class="btn" id="clearShop">Clear list</button><button class="btn primary" id="markShopped">✓ Mark as shopped</button></div>
+</div>
+
+<div class="sheet" id="historySheet" aria-hidden="true">
+  <div class="sheethead"><h2>Meal history</h2><button class="close" data-close>✕</button></div>
+  <p class="historyIntro">Previous dated meal tiles. History opens with the most recent 5 past days; load another 5 whenever you want to look further back.</p>
+  <div class="historyDays" id="historyDays"></div>
+  <div class="historyActions"><button class="btn" id="loadMoreHistory">Load 5 more days</button></div>
 </div>
 
 <div class="sheet" id="rulesSheet" aria-hidden="true">
@@ -260,18 +269,23 @@ function setSyncConfig(cfg){localStorage.setItem(SYNC_CONFIG_KEY,JSON.stringify(
 let cloudSaveTimer=null,cloudSaveSuppressed=false;
 const CLOUD_SESSION_KEY='mealSpinnerCloudLoadedSessionV1';
 function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(state));if(!cloudSaveSuppressed)scheduleCloudSave()}
-function scheduleCloudSave(){const cfg=getSyncConfig();if(!cfg.url||!cfg.key)return;clearTimeout(cloudSaveTimer);cloudSaveTimer=setTimeout(()=>cloudSave(cfg),1200)}
+function scheduleCloudSave(){const cfg=getSyncConfig();if(!cfg.url||!cfg.key){setSyncStatus('Sync off');return}clearTimeout(cloudSaveTimer);setSyncStatus('Saving…');cloudSaveTimer=setTimeout(()=>cloudSave(cfg),1200)}
 function cloudSave(cfg=getSyncConfig()){
-  if(!cfg.url||!cfg.key)return;
+  if(!cfg.url||!cfg.key){setSyncStatus('Sync off');return}
   const payload={action:'saveState',key:cfg.key,state};
-  fetch(cfg.url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)}).then(()=>setSyncStatus('Saved to Sheets')).catch(()=>setSyncStatus('Cloud save failed'));
+  fetch(cfg.url,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload)}).then(()=>setSyncStatus('Synced')).catch(()=>setSyncStatus('Sync issue'));
 }
 function cloudLoad(){
   const cfg=getSyncConfig();if(!cfg.url||!cfg.key){toast('Add the Apps Script URL and household key first');return}
   const cb='mealSpinnerCloud_'+Date.now();window[cb]=payload=>{try{if(!payload||!payload.ok||!payload.state)throw new Error(payload?.error||'No state returned');cloudSaveSuppressed=true;localStorage.setItem(STORAGE_KEY,JSON.stringify(payload.state));sessionStorage.setItem(CLOUD_SESSION_KEY,'1');setSyncStatus('Loaded from Sheets');delete window[cb];script.remove();location.reload()}catch(e){setSyncStatus('Load failed');toast(e.message)}};
   const script=document.createElement('script');script.src=`${cfg.url}${cfg.url.includes('?')?'&':'?'}action=loadState&key=${encodeURIComponent(cfg.key)}&callback=${cb}&_=${Date.now()}`;script.onerror=()=>{cloudSaveSuppressed=false;setSyncStatus('Load failed');toast('Could not load shared data');delete window[cb];script.remove()};document.body.appendChild(script);setSyncStatus('Loading…');
 }
-function setSyncStatus(msg){const el=document.getElementById('syncStatus');if(el)el.textContent=msg}
+function setSyncStatus(msg){
+  const el=document.getElementById('syncStatus');if(el)el.textContent=msg;
+  const top=document.getElementById('topSyncStatus'),txt=document.getElementById('topSyncText');
+  if(txt)txt.textContent=msg;
+  if(top){top.classList.remove('good','busy','bad');const m=String(msg||'').toLowerCase();if(m.includes('synced')||m.includes('saved')||m.includes('loaded')||m.includes('connection saved'))top.classList.add('good');else if(m.includes('saving')||m.includes('loading'))top.classList.add('busy');else if(m.includes('fail')||m.includes('issue'))top.classList.add('bad')}
+}
 function menuDates(){const start=parseLocalISO(state.settings.startDate);return Array.from({length:Number(state.settings.horizonDays||10)},(_,i)=>addDays(start,i))}
 function patternFor(date,type){return ruleKey(dayName(date),type)}
 function hasRule(kind,date,type){return (state.settings.rules[kind]||[]).includes(patternFor(date,type))}
@@ -803,6 +817,28 @@ function renderShoppingList(){
 function openShopping(){if(!state.shoppingDraft?.generatedAt&&!state.shoppingDraft?.cleared)buildShoppingDraft();else renderShoppingList();openSheet('shoppingSheet')}
 function updateCartBadge(){const n=unshoppedSourceSlots().length,b=document.getElementById('cartBadge');if(!b)return;b.textContent=n>99?'99+':String(n);b.classList.toggle('show',n>0)}
 
+let historyDaysVisible=5;
+function historyDateAt(offset){const d=new Date();d.setHours(12,0,0,0);return addDays(d,-offset)}
+function renderHistory(){
+  const root=document.getElementById('historyDays');if(!root)return;root.innerHTML='';
+  for(let offset=1;offset<=historyDaysVisible;offset++){
+    const date=historyDateAt(offset),dateISO=isoLocal(date),row=document.createElement('div');row.className='historyDay';
+    row.innerHTML=`<div class="historyDate"><strong>${shortDay(date)}</strong><span class="n">${date.getDate()}</span><small>${date.toLocaleDateString(undefined,{month:'short'})}</small></div>`;
+    ['Lunch','Dinner'].forEach(type=>{
+      const slot=state.plan[slotKey(dateISO,type)],meal=slot?.mealId?state.meals.find(m=>m.id===slot.mealId):null,t=document.createElement('div');
+      t.className=`historyTile ${slot?.shoppingExportedAt?'shoppingDone':''}`;
+      const cook=meal?effectiveCook(date,type,meal,slot):'';
+      let meta='';
+      if(meal){const bits=[];if(cook&&cook!=='–')bits.push(`<span class="chip">${cook}</span>`);if(slot?.linkedFrom)bits.push('<span class="chip leftover">↳ leftover</span>');if(slot?.shoppingExportedAt)bits.push('<span class="chip shopping">🛒 shopped</span>');meta=bits.join('')}
+      const label=meal?meal.name:(slot?.note||'No meal');
+      t.innerHTML=`<div class="historySlot">${type}</div><div class="historyMeal ${meal?'':'empty'}">${label}</div><div class="historyMeta">${meta}</div>`;row.appendChild(t);
+    });
+    root.appendChild(row);
+  }
+}
+function openHistory(){historyDaysVisible=5;renderHistory();openSheet('historySheet')}
+function loadMoreHistory(){historyDaysVisible+=5;renderHistory()}
+
 function openSheet(id){document.getElementById('backdrop').classList.add('open');document.getElementById(id).classList.add('open');document.getElementById(id).setAttribute('aria-hidden','false')}
 function closeSheets(){document.getElementById('backdrop').classList.remove('open');document.querySelectorAll('.sheet').forEach(s=>{s.classList.remove('open');s.setAttribute('aria-hidden','true')})}
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('show'),1650)}
@@ -812,6 +848,8 @@ document.getElementById('resetBtn').onclick=clearUnlockedVisible;
 document.getElementById('rulesBtn').onclick=()=>{renderRules();openSheet('rulesSheet')};
 document.getElementById('mealsBtn').onclick=()=>{clearMealForm();renderMealLibrary();openSheet('mealsSheet')};
 document.getElementById('shoppingBtn').onclick=openShopping;
+document.getElementById('historyBtn').onclick=openHistory;
+document.getElementById('loadMoreHistory').onclick=loadMoreHistory;
 document.getElementById('backdrop').onclick=closeSheets;document.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeSheets);
 document.getElementById('mealSearch').oninput=renderPickList;
 document.getElementById('batchFilter').onclick=()=>{pickerFilters.batch=!pickerFilters.batch;renderFilterPills();renderPickList()};
@@ -826,8 +864,8 @@ document.getElementById('confirmSpin').onclick=confirmSpinRange;
 document.getElementById('confirmMealSelection').onclick=confirmPickerSelection;
 document.getElementById('clearTile').onclick=clearActiveTile;
 const startupSync=getSyncConfig();
-if(startupSync.url&&startupSync.key&&!sessionStorage.getItem(CLOUD_SESSION_KEY)){cloudSaveSuppressed=true;setTimeout(cloudLoad,80)}
-else cloudSaveSuppressed=false;
+if(startupSync.url&&startupSync.key&&!sessionStorage.getItem(CLOUD_SESSION_KEY)){cloudSaveSuppressed=true;setSyncStatus('Loading…');setTimeout(cloudLoad,80)}
+else{cloudSaveSuppressed=false;setSyncStatus(startupSync.url&&startupSync.key?'Synced':'Sync off')}
 applyRulesToPlan();render();
 </script>
 
